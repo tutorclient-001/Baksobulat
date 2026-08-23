@@ -4,20 +4,26 @@ class ApiClient {
   private token: string | null = null;
 
   constructor() {
-    this.token = localStorage.getItem('bank_soal_token');
+    this.token = typeof window !== 'undefined' ? localStorage.getItem('bank_soal_token') : null;
   }
 
   setToken(token: string | null) {
     this.token = token;
-    if (token) {
-      localStorage.setItem('bank_soal_token', token);
-    } else {
-      localStorage.removeItem('bank_soal_token');
+    if (typeof window !== 'undefined') {
+      if (token) {
+        localStorage.setItem('bank_soal_token', token);
+      } else {
+        localStorage.removeItem('bank_soal_token');
+      }
     }
   }
 
   getToken(): string | null {
-    return this.token || localStorage.getItem('bank_soal_token');
+    if (this.token) return this.token;
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('bank_soal_token');
+    }
+    return null;
   }
 
   private async request<T = any>(
@@ -43,17 +49,19 @@ class ApiClient {
       const response = await fetch(url, {
         ...options,
         headers,
+        credentials: 'include', // Ensures HttpOnly cookies are transmitted
       });
 
-      // Handle binary/stream responses
-      const contentType = response.headers.get('content-type');
+      const contentType = response.headers.get('content-type') || '';
+
+      // Handle binary/stream responses (PDF preview / download, Excel export)
       if (
-        contentType?.includes('application/pdf') ||
-        contentType?.includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') ||
-        contentType?.includes('application/octet-stream')
+        contentType.includes('application/pdf') ||
+        contentType.includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') ||
+        contentType.includes('application/octet-stream')
       ) {
         if (!response.ok) {
-          throw new Error(`HTTP Error ${response.status}: Failed to download file`);
+          throw new Error(`HTTP Error ${response.status}: Gagal mengunduh berkas.`);
         }
         const blob = await response.blob();
         return {
@@ -62,23 +70,50 @@ class ApiClient {
         };
       }
 
-      const json = await response.json();
+      // Check if response is JSON
+      if (contentType.includes('application/json')) {
+        const json = await response.json();
 
-      if (!response.ok) {
-        if (response.status === 401 && !endpoint.includes('/auth/login')) {
-          this.setToken(null);
-          window.location.href = '/login';
+        if (!response.ok) {
+          if (response.status === 401 && !endpoint.includes('/auth/login')) {
+            this.setToken(null);
+            if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+              window.location.href = '/login';
+            }
+          }
+          return {
+            success: false,
+            error: {
+              code: json.error?.code || `HTTP_${response.status}`,
+              message: json.error?.message || `Terjadi kesalahan sistem (Status: ${response.status})`,
+            },
+          };
         }
-        throw new Error(json.error?.message || `Terjadi kesalahan sistem (Status: ${response.status})`);
+
+        return json;
       }
 
-      return json;
+      // Response is NOT JSON (e.g. Vercel 404 HTML, Edge error, or plain text)
+      const text = await response.text();
+      const isHtml = text.trim().startsWith('<!DOCTYPE') || text.includes('<html') || text.includes('The page could not be found');
+
+      const errorMessage = isHtml
+        ? `API mengembalikan respons HTML (Status: ${response.status}). Periksa routing Vercel Function /api/* atau status deployment backend.`
+        : (text || `Server mengembalikan respons non-JSON (Status: ${response.status}).`);
+
+      return {
+        success: false,
+        error: {
+          code: `HTTP_${response.status}_NON_JSON`,
+          message: errorMessage,
+        },
+      };
     } catch (err: any) {
       return {
         success: false,
         error: {
-          code: 'API_ERROR',
-          message: err.message || 'Gagal menghubungi server.',
+          code: 'NETWORK_ERROR',
+          message: err.message || 'Gagal menghubungi server backend.',
         },
       };
     }

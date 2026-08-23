@@ -29,105 +29,18 @@ export interface FallbackMeta {
   filename?: string;
 }
 
-// Local persistent cache directory
+// Local persistent cache directory for development fallback
 const STORAGE_DIR = path.resolve(process.cwd(), 'data_storage_cache');
 if (!fs.existsSync(STORAGE_DIR)) {
   try {
     fs.mkdirSync(STORAGE_DIR, { recursive: true });
   } catch (err) {
-    console.warn('Could not create STORAGE_DIR:', err);
+    // Ignore in read-only environments
   }
 }
 
-// In-memory buffer cache for fast access
+// In-memory buffer cache
 const localFileStorage = new Map<string, { buffer: Buffer; filename: string; mimeType: string; uploadedAt: Date }>();
-
-// Helper to generate a valid PDF buffer on demand
-export function generateValidPdfBuffer(
-  title: string = 'Naskah Bank Soal Resmi',
-  meta: FallbackMeta = {}
-): Buffer {
-  const isAnswerKey = meta.fileType === 'ANSWER_KEY';
-  const subtitle = `${meta.documentCode || 'BS-DOC'} • ${meta.subject || 'Mata Pelajaran'} • Kelas ${meta.grade || 'Umum'}`;
-  const header = isAnswerKey ? 'KUNCI JAWABAN RESMI LEMBAR JAWABAN KOMPUTER' : 'NASKAH SOAL UJIAN & BANK SOAL RESMI';
-
-  const safe = (str: string) =>
-    (str || '').replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
-
-  const streamLines = [
-    'BT',
-    '/F1 15 Tf',
-    '50 740 Td',
-    `(${safe(header)}) Tj`,
-    '/F1 12 Tf',
-    '0 -24 Td',
-    `(${safe(title)}) Tj`,
-    '/F1 10 Tf',
-    '0 -20 Td',
-    `(${safe(subtitle)}) Tj`,
-    '0 -16 Td',
-    `(Tahun Ajaran: ${safe(meta.academicYear || '2025/2026')} | Semester: ${safe(meta.semester || 'GENAP')}) Tj`,
-    '0 -22 Td',
-    '(------------------------------------------------------------------------------------------------------) Tj',
-    '0 -20 Td',
-    isAnswerKey
-      ? '((DOKUMEN KUNCI JAWABAN & MATRIKS PENILAIAN TERVERIFIKASI)) Tj'
-      : '(PETUNJUK UMUM PENGERJAAN NASKAH SOAL:) Tj',
-    '0 -16 Td',
-    isAnswerKey
-      ? '(1. Lembar kunci ini terintegrasi langsung dengan modul scan LJK OMR dan Export Excel.) Tj'
-      : '(1. Periksalah kelengkapan naskah soal dan nomor halaman sebelum mulai mengerjakan.) Tj',
-    '0 -16 Td',
-    isAnswerKey
-      ? '(2. Bobot penilaian dan skor kelulusan KKM terdaftar dalam database institusi.) Tj'
-      : '(2. Hitamkan bulatan pilihan jawaban yang benar pada Lembar Jawaban Komputer (LJK).) Tj',
-    '0 -16 Td',
-    isAnswerKey
-      ? '(3. Kunci jawaban interaktif dapat disunting melalui tab Editor Kunci LJK.) Tj'
-      : '(3. Gunakan pensil 2B untuk mengisi LJK dan hindari melipat lembar jawaban.) Tj',
-    '0 -24 Td',
-    '(Status Berkas: Terverifikasi Digital oleh Bank Soal LJK-Master) Tj',
-    'ET',
-  ];
-
-  const streamContent = streamLines.join('\n');
-  const streamLength = Buffer.byteLength(streamContent, 'utf-8');
-
-  const pdfString = `%PDF-1.4
-1 0 obj
-<< /Type /Catalog /Pages 2 0 R >>
-endobj
-2 0 obj
-<< /Type /Pages /Kids [3 0 R] /Count 1 >>
-endobj
-3 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
-endobj
-4 0 obj
-<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
-endobj
-5 0 obj
-<< /Length ${streamLength} >>
-stream
-${streamContent}
-endstream
-endobj
-xref
-0 6
-0000000000 65535 f 
-0000000009 00000 n 
-0000000058 00000 n 
-0000000115 00000 n 
-0000000224 00000 n 
-0000000293 00000 n 
-trailer
-<< /Size 6 /Root 1 0 R >>
-startxref
-${400 + streamLength}
-%%EOF`;
-
-  return Buffer.from(pdfString, 'utf-8');
-}
 
 export class GoogleDriveService {
   private drive: any = null;
@@ -139,24 +52,25 @@ export class GoogleDriveService {
   }
 
   private initDrive() {
-    if (
-      config.GOOGLE_SERVICE_ACCOUNT_EMAIL &&
-      config.GOOGLE_PRIVATE_KEY &&
-      config.GOOGLE_SERVICE_ACCOUNT_EMAIL.trim() !== ''
-    ) {
+    const email = config.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim();
+    let rawKey = config.GOOGLE_PRIVATE_KEY?.trim();
+
+    if (email && rawKey) {
       try {
-        const privateKey = config.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n');
+        // Handle escaped newlines properly from environment variables
+        const privateKey = rawKey.includes('\\n') ? rawKey.replace(/\\n/g, '\n') : rawKey;
+
         const auth = new google.auth.JWT({
-          email: config.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+          email,
           key: privateKey,
           scopes: ['https://www.googleapis.com/auth/drive'],
         });
 
         this.drive = google.drive({ version: 'v3', auth });
         this.isConfigured = true;
-        console.log('Google Drive Service Account initialized successfully.');
+        console.log('✅ Google Drive Service Account terinisialisasi.');
       } catch (err: any) {
-        console.warn('Failed to initialize Google Drive Client:', err.message);
+        console.warn('⚠️ Gagal inisialisasi Google Drive Client:', err.message);
         this.isConfigured = false;
       }
     } else {
@@ -184,15 +98,15 @@ export class GoogleDriveService {
                   mimeType: meta.mimeType || 'application/pdf',
                   uploadedAt: new Date(meta.uploadedAt || Date.now()),
                 });
-              } catch (e) {
+              } catch {
                 // Ignore individual corrupt cache
               }
             }
           }
         }
       }
-    } catch (err) {
-      console.warn('Failed to load persisted storage cache:', err);
+    } catch {
+      // Ignore
     }
   }
 
@@ -206,8 +120,8 @@ export class GoogleDriveService {
         path.join(STORAGE_DIR, `${fileId}.json`),
         JSON.stringify({ fileId, filename, mimeType, uploadedAt: new Date().toISOString() })
       );
-    } catch (err) {
-      console.warn(`Could not persist file ${fileId} locally:`, err);
+    } catch {
+      // Ignore if read-only filesystem (e.g. serverless container)
     }
   }
 
@@ -217,9 +131,12 @@ export class GoogleDriveService {
 
   public async checkDriveHealth(): Promise<{ healthy: boolean; folderId?: string; error?: string }> {
     if (!this.isConfigured || !this.drive) {
+      const isProd = process.env.NODE_ENV === 'production';
       return {
-        healthy: false,
-        error: 'Google Drive Service Account is not configured in environment (GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_PRIVATE_KEY)',
+        healthy: !isProd, // In dev mode, healthy true; in prod, healthy false
+        error: this.isConfigured
+          ? undefined
+          : 'Google Drive Service Account belum terkonfigurasi (GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_PRIVATE_KEY).',
       };
     }
 
@@ -238,7 +155,7 @@ export class GoogleDriveService {
   public async uploadFile(params: UploadParams): Promise<UploadResult> {
     const { buffer, filename, mimeType, folderId, customFileId } = params;
 
-    // Real Google Drive Upload
+    // 1. Real Google Drive Upload
     if (this.isConfigured && this.drive) {
       try {
         const stream = new Readable();
@@ -263,7 +180,7 @@ export class GoogleDriveService {
         const fileId = response.data.id;
         if (!fileId) throw new Error('Google Drive upload returned no file ID');
 
-        // Also cache locally for fast preview
+        // Cache locally for faster preview streaming
         localFileStorage.set(fileId, {
           buffer,
           filename,
@@ -278,11 +195,27 @@ export class GoogleDriveService {
           size: buffer.length,
         };
       } catch (err: any) {
-        console.error('Google Drive upload failed, falling back to local storage:', err.message);
+        console.error('❌ Google Drive upload gagal:', err.message);
+        if (config.STORAGE_PROVIDER === 'google-drive') {
+          throw {
+            statusCode: 503,
+            code: 'STORAGE_UNAVAILABLE',
+            message: `Gagal mengunggah file ke Google Drive: ${err.message}`,
+          };
+        }
       }
     }
 
-    // Local / Dev Fallback
+    // 2. Production check: If configured as google-drive but not initialized, throw error
+    if (config.STORAGE_PROVIDER === 'google-drive' && process.env.NODE_ENV === 'production') {
+      throw {
+        statusCode: 503,
+        code: 'STORAGE_NOT_CONFIGURED',
+        message: 'Layanan Google Drive belum dikonfigurasi pada environment produksi.',
+      };
+    }
+
+    // 3. Development Fallback
     const mockFileId = customFileId || `gdrive_local_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     localFileStorage.set(mockFileId, {
       buffer,
@@ -306,7 +239,7 @@ export class GoogleDriveService {
     // 1. Check in-memory cache
     let cached = localFileStorage.get(fileId);
 
-    // 2. Check disk cache if not in memory
+    // 2. Check disk cache
     if (!cached) {
       const binPath = path.join(STORAGE_DIR, `${fileId}.bin`);
       const metaPath = path.join(STORAGE_DIR, `${fileId}.json`);
@@ -322,8 +255,8 @@ export class GoogleDriveService {
           }
           cached = { buffer, filename, mimeType, uploadedAt: new Date() };
           localFileStorage.set(fileId, cached);
-        } catch (e) {
-          // ignore error
+        } catch {
+          // ignore
         }
       }
     }
@@ -340,8 +273,8 @@ export class GoogleDriveService {
       };
     }
 
-    // 3. Try Google Drive if configured and file is not explicitly local
-    if (this.isConfigured && this.drive && !fileId.startsWith('gdrive_local_') && !fileId.startsWith('file_')) {
+    // 3. Try Google Drive
+    if (this.isConfigured && this.drive && !fileId.startsWith('gdrive_local_')) {
       try {
         const metaRes = await this.drive.files.get({
           fileId,
@@ -355,40 +288,26 @@ export class GoogleDriveService {
 
         return {
           stream: streamRes.data,
-          filename: metaRes.data.name || 'dokumen.pdf',
+          filename: metaRes.data.name || fallbackMeta?.filename || 'dokumen.pdf',
           mimeType: metaRes.data.mimeType || 'application/pdf',
           size: metaRes.data.size ? parseInt(metaRes.data.size, 10) : 0,
         };
       } catch (err: any) {
-        console.warn(`Google Drive fetch failed for ${fileId}:`, err.message);
+        console.warn(`Google Drive fetch gagal untuk ${fileId}:`, err.message);
+        if (config.STORAGE_PROVIDER === 'google-drive' && process.env.NODE_ENV === 'production') {
+          throw {
+            statusCode: 404,
+            code: 'FILE_NOT_FOUND',
+            message: `File tidak ditemukan di Google Drive: ${err.message}`,
+          };
+        }
       }
     }
 
-    // 4. Graceful Fallback: Generate valid PDF buffer dynamically so user never sees 500 error
-    const generatedBuffer = generateValidPdfBuffer(
-      fallbackMeta?.title || 'Naskah Soal Ujian',
-      fallbackMeta
-    );
-    const defaultFilename = fallbackMeta?.filename || `${fallbackMeta?.documentCode || 'Dokumen'}_Soal.pdf`;
-
-    // Cache the generated buffer
-    localFileStorage.set(fileId, {
-      buffer: generatedBuffer,
-      filename: defaultFilename,
-      mimeType: 'application/pdf',
-      uploadedAt: new Date(),
-    });
-    this.persistFileLocally(fileId, generatedBuffer, defaultFilename, 'application/pdf');
-
-    const stream = new Readable();
-    stream.push(generatedBuffer);
-    stream.push(null);
-
-    return {
-      stream,
-      filename: defaultFilename,
-      mimeType: 'application/pdf',
-      size: generatedBuffer.length,
+    throw {
+      statusCode: 404,
+      code: 'FILE_NOT_FOUND',
+      message: 'Berkas PDF tidak ditemukan pada media penyimpanan.',
     };
   }
 
@@ -400,11 +319,11 @@ export class GoogleDriveService {
       const metaPath = path.join(STORAGE_DIR, `${fileId}.json`);
       if (fs.existsSync(binPath)) fs.unlinkSync(binPath);
       if (fs.existsSync(metaPath)) fs.unlinkSync(metaPath);
-    } catch (e) {
+    } catch {
       // ignore
     }
 
-    if (this.isConfigured && this.drive && !fileId.startsWith('gdrive_local_') && !fileId.startsWith('file_')) {
+    if (this.isConfigured && this.drive && !fileId.startsWith('gdrive_local_')) {
       try {
         await this.drive.files.delete({ fileId });
       } catch (err: any) {
@@ -417,7 +336,7 @@ export class GoogleDriveService {
     if (localFileStorage.has(fileId)) return true;
     if (fs.existsSync(path.join(STORAGE_DIR, `${fileId}.bin`))) return true;
 
-    if (this.isConfigured && this.drive && !fileId.startsWith('gdrive_local_') && !fileId.startsWith('file_')) {
+    if (this.isConfigured && this.drive && !fileId.startsWith('gdrive_local_')) {
       try {
         await this.drive.files.get({ fileId, fields: 'id' });
         return true;
@@ -425,8 +344,7 @@ export class GoogleDriveService {
         return false;
       }
     }
-    // Return true for fallback generation
-    return true;
+    return false;
   }
 }
 

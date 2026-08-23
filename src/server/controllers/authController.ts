@@ -23,12 +23,13 @@ export class AuthController {
         userAgent
       );
 
-      // Also set HttpOnly cookie for extra security
+      // Set standard HttpOnly cookie for web security
       res.cookie('access_token', accessToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
-        maxAge: 15 * 60 * 1000,
+        path: '/',
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       });
 
       res.status(200).json({
@@ -57,7 +58,7 @@ export class AuthController {
         });
       }
 
-      res.clearCookie('access_token');
+      res.clearCookie('access_token', { path: '/' });
       res.status(200).json({
         success: true,
         data: { message: 'Berhasil keluar sistem.' },

@@ -2,23 +2,29 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import apiRouter from './routes/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
-import { initDatabase, checkDbHealth } from './config/database.js';
+import { checkDbHealth, ensureDatabaseConnected } from './config/database.js';
 import { googleDriveService } from './services/googleDriveService.js';
-import { seedDatabase } from './db/seed.js';
 import { config } from './config/env.js';
 
 export const app = express();
 
 app.set('trust proxy', 1);
 
-app.use(cors({
-  origin: config.CORS_ORIGIN === '*' ? true : config.CORS_ORIGIN,
-  credentials: true,
-}));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Configure CORS
+const allowedOrigin = config.CORS_ORIGIN === '*' ? true : config.CORS_ORIGIN;
+app.use(
+  cors({
+    origin: allowedOrigin,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  })
+);
 
-// Basic Cookie Parser
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+
+// Basic Cookie Parser Middleware
 app.use((req, _res, next) => {
   const cookieHeader = req.headers.cookie;
   (req as any).cookies = {};
@@ -33,15 +39,20 @@ app.use((req, _res, next) => {
   next();
 });
 
-// Health Checks
-app.get('/health', (_req: Request, res: Response) => {
-  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
-});
+// Root & API Health Check Handlers
+const handleHealth = (_req: Request, res: Response) => {
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    env: config.NODE_ENV,
+  });
+};
 
-app.get('/health/ready', async (_req: Request, res: Response) => {
+const handleHealthReady = async (_req: Request, res: Response) => {
   const dbHealth = await checkDbHealth();
   const driveHealth = await googleDriveService.checkDriveHealth();
   const isReady = dbHealth.healthy;
+
   res.status(isReady ? 200 : 503).json({
     status: isReady ? 'ready' : 'unhealthy',
     database: dbHealth,
@@ -51,20 +62,26 @@ app.get('/health/ready', async (_req: Request, res: Response) => {
       details: driveHealth,
     },
   });
-});
+};
 
-// Mount API
+app.get('/health', handleHealth);
+app.get('/health/ready', handleHealthReady);
+app.get('/api/health', handleHealth);
+app.get('/api/health/ready', handleHealthReady);
+
+// Mount API Routes
 app.use('/api', apiRouter);
 
-// Error Handler
-app.use(errorHandler);
+// Fallback for unmatched /api routes to prevent HTML response
+app.all('/api/*', (req: Request, res: Response) => {
+  res.status(404).json({
+    success: false,
+    error: {
+      code: 'ROUTE_NOT_FOUND',
+      message: `Endpoint API ${req.method} ${req.originalUrl} tidak ditemukan pada server backend.`,
+    },
+  });
+});
 
-// Global initialization flag
-let isInitialized = false;
-export async function ensureInitialized() {
-  if (!isInitialized) {
-    await initDatabase();
-    await seedDatabase();
-    isInitialized = true;
-  }
-}
+// Centralized Error Handler
+app.use(errorHandler);

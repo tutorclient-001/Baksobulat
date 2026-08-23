@@ -13,42 +13,26 @@ export class AuthService {
     userAgent?: string
   ): Promise<{ user: User; accessToken: string }> {
     const cleanEmail = email.trim().toLowerCase();
-    let user = await userRepository.findByEmail(cleanEmail);
+    const user = await userRepository.findByEmail(cleanEmail);
 
-    // If user does not exist yet, auto-provision user account
+    // 1. Strict user lookup: NO auto-create accounts on login!
     if (!user) {
-      const salt = await bcrypt.genSalt(10);
-      const password_hash = await bcrypt.hash(pass, salt);
-      const role: UserRole = cleanEmail.includes('admin')
-        ? 'ADMIN'
-        : cleanEmail.includes('viewer')
-        ? 'VIEWER'
-        : 'TUTOR';
-      
-      const rawName = cleanEmail.split('@')[0].replace(/[._-]/g, ' ');
-      const formattedName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
-
-      user = (await userRepository.create({
-        id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        name: formattedName || 'Tutor Bank Soal',
-        email: cleanEmail,
-        password_hash,
-        role,
-        is_active: true,
-      })) as unknown as UserRecord;
-
       await auditLogRepository.log({
         id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        user_id: user.id,
-        action: 'AUTO_REGISTER_LOGIN',
+        action: 'LOGIN_FAILED',
         entity_type: 'USER',
-        entity_id: user.id,
-        metadata: { email: cleanEmail, role: user.role },
+        metadata: { email: cleanEmail, reason: 'USER_NOT_FOUND' },
         ip_address: ipAddress,
         user_agent: userAgent,
       });
+      throw {
+        statusCode: 401,
+        code: 'INVALID_CREDENTIALS',
+        message: 'Email atau kata sandi tidak valid.',
+      };
     }
 
+    // 2. Active status check
     if (!user.is_active) {
       await auditLogRepository.log({
         id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -59,39 +43,36 @@ export class AuthService {
         ip_address: ipAddress,
         user_agent: userAgent,
       });
-      throw { statusCode: 403, code: 'ACCOUNT_DISABLED', message: 'Akun Anda dinonaktifkan. Hubungi Administrator.' };
+      throw {
+        statusCode: 403,
+        code: 'ACCOUNT_DISABLED',
+        message: 'Akun Anda dinonaktifkan. Hubungi Administrator.',
+      };
     }
 
-    let isValidPassword = await bcrypt.compare(pass, user.password_hash);
+    // 3. Strict password hash verification: NO password bypasses!
+    const isValidPassword = await bcrypt.compare(pass, user.password_hash);
     if (!isValidPassword) {
-      // In development/demo mode, if using common demo passwords, allow update
-      if (
-        pass === 'Admin#2026!' ||
-        pass === 'Tutor#2026!' ||
-        pass === 'Viewer#2026!' ||
-        pass === 'password' ||
-        pass === '123456'
-      ) {
-        const salt = await bcrypt.genSalt(10);
-        const newHash = await bcrypt.hash(pass, salt);
-        await userRepository.update(user.id, { password_hash: newHash });
-        isValidPassword = true;
-      } else {
-        await auditLogRepository.log({
-          id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-          user_id: user.id,
-          action: 'LOGIN_FAILED',
-          entity_type: 'USER',
-          metadata: { email: cleanEmail, reason: 'WRONG_PASSWORD' },
-          ip_address: ipAddress,
-          user_agent: userAgent,
-        });
-        throw { statusCode: 401, code: 'INVALID_CREDENTIALS', message: 'Email atau kata sandi tidak valid.' };
-      }
+      await auditLogRepository.log({
+        id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        user_id: user.id,
+        action: 'LOGIN_FAILED',
+        entity_type: 'USER',
+        metadata: { email: cleanEmail, reason: 'WRONG_PASSWORD' },
+        ip_address: ipAddress,
+        user_agent: userAgent,
+      });
+      throw {
+        statusCode: 401,
+        code: 'INVALID_CREDENTIALS',
+        message: 'Email atau kata sandi tidak valid.',
+      };
     }
 
+    // 4. Update last login timestamp
     await userRepository.updateLastLogin(user.id);
 
+    // 5. Generate secure JWT token
     const accessToken = jwt.sign(
       {
         userId: user.id,
@@ -103,6 +84,7 @@ export class AuthService {
       { expiresIn: config.ACCESS_TOKEN_EXPIRES_IN as any }
     );
 
+    // 6. Audit log login success
     await auditLogRepository.log({
       id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       user_id: user.id,
@@ -128,7 +110,11 @@ export class AuthService {
     const cleanEmail = data.email.trim().toLowerCase();
     const existing = await userRepository.findByEmail(cleanEmail);
     if (existing) {
-      throw { statusCode: 409, code: 'EMAIL_ALREADY_EXISTS', message: 'Email sudah terdaftar dalam sistem.' };
+      throw {
+        statusCode: 409,
+        code: 'EMAIL_ALREADY_EXISTS',
+        message: 'Email sudah terdaftar dalam sistem.',
+      };
     }
 
     const salt = await bcrypt.genSalt(10);
