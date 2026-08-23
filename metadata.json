@@ -1,0 +1,6 @@
+{
+  "name": "Bank Soal PDF & Sistem Kunci Jawaban LJK",
+  "description": "Sistem manajemen Bank Soal PDF institusional dengan pratinjau split file, editor kunci jawaban interaktif LJK (PG, PGK, T/F, Essay), ekspor format LJK Excel otomatis, integrasi Neon PostgreSQL & Google Drive, serta kontrol akses berbasis peran (RBAC).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
