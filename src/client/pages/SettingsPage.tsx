@@ -56,6 +56,25 @@ export function SettingsPage() {
 
   const toast = useToast();
 
+  const [isMigrating, setIsMigrating] = useState(false);
+
+  const handleRunMigration = async () => {
+    setIsMigrating(true);
+    try {
+      const res = await apiClient.post('/settings/run-migration');
+      if (res.success) {
+        toast.success('Migrasi Berhasil', 'Skema tabel dan akun admin berhasil dibuat di database PostgreSQL!');
+        handleTestDb();
+      } else {
+        toast.error('Gagal Migrasi', res.error?.message || 'Terjadi kesalahan');
+      }
+    } catch (err: any) {
+      toast.error('Gagal Migrasi', err.message);
+    } finally {
+      setIsMigrating(false);
+    }
+  };
+
   const fetchSettings = async () => {
     setIsLoading(true);
     try {
@@ -572,14 +591,24 @@ AUTH_SECRET=rahasia-super-aman-kunci-jwt-bank-soal-2026`;
                 </p>
               </div>
 
-              <button
-                onClick={handleTestDb}
-                disabled={isTestingDb}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-xl text-xs font-semibold transition-colors"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isTestingDb ? 'animate-spin' : ''}`} />
-                <span>Uji Koneksi DB Sekarang</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleRunMigration}
+                  disabled={isMigrating}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold transition-colors shadow-xs"
+                >
+                  <Zap className={`w-3.5 h-3.5 ${isMigrating ? 'animate-spin' : ''}`} />
+                  <span>{isMigrating ? 'Memigrasikan DB...' : 'Migrasikan & Seed DB Sekarang'}</span>
+                </button>
+                <button
+                  onClick={handleTestDb}
+                  disabled={isTestingDb}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-xl text-xs font-semibold transition-colors"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isTestingDb ? 'animate-spin' : ''}`} />
+                  <span>Uji Koneksi DB</span>
+                </button>
+              </div>
             </div>
 
             {/* Step by Step Guide */}

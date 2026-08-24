@@ -2,22 +2,20 @@ import { getPool, ensureDatabaseConnected } from '../config/database.js';
 import { config } from '../config/env.js';
 
 export async function runMigrations(): Promise<void> {
-  console.log('🔄 Menjalankan migrasi database Neon PostgreSQL...');
-
-  if (!config.DATABASE_URL) {
-    console.error('❌ Error: DATABASE_URL tidak ditemukan. Atur DATABASE_URL terlebih dahulu.');
-    process.exit(1);
+  if (!config.DATABASE_URL || config.DATABASE_URL.trim() === '') {
+    console.log('ℹ️ DATABASE_URL kosong. Menggunakan penyimpanan memori lokal.');
+    return;
   }
 
-  await ensureDatabaseConnected();
   const pool = getPool();
   if (!pool) {
-    console.error('❌ Error: Gagal menginisialisasi connection pool database.');
-    process.exit(1);
+    console.warn('⚠️ Connection pool database belum siap untuk migrasi.');
+    return;
   }
 
-  const client = await pool.connect();
+  let client;
   try {
+    client = await pool.connect();
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id VARCHAR(64) PRIMARY KEY,
@@ -179,12 +177,12 @@ export async function runMigrations(): Promise<void> {
       CREATE INDEX IF NOT EXISTS idx_audit_user_id ON audit_logs(user_id);
     `);
 
-    console.log('✅ Migrasi database PostgreSQL selesai dengan sukses.');
+    console.log('✅ Skema tabel database PostgreSQL berhasil diverifikasi / dimigrasikan.');
   } catch (err: any) {
     console.error('❌ Gagal menjalankan migrasi database:', err.message);
     throw err;
   } finally {
-    client.release();
+    if (client) client.release();
   }
 }
 

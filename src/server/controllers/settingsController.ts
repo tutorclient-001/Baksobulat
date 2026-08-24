@@ -78,6 +78,39 @@ export class SettingsController {
       next(err);
     }
   }
+
+  async runMigrationAndSeed(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { runMigrations } = await import('../db/migrate.js');
+      const { seedDatabase } = await import('../db/seed.js');
+
+      await runMigrations();
+      await seedDatabase();
+
+      await auditLogRepository.log({
+        id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        user_id: req.user?.id,
+        action: 'RUN_MIGRATION_SEED',
+        entity_type: 'DATABASE',
+        metadata: { triggeredBy: req.user?.email },
+      });
+
+      res.status(200).json({
+        success: true,
+        data: {
+          message: 'Migrasi skema dan seed data database Neon PostgreSQL berhasil diselesaikan!',
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'MIGRATION_FAILED',
+          message: `Gagal menjalankan migrasi database: ${err.message}`,
+        },
+      });
+    }
+  }
 }
 
 export const settingsController = new SettingsController();

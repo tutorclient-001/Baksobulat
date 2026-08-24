@@ -134,6 +134,9 @@ setRouter.get('/test-database', requireAuth, requireRole('ADMIN'), (req, res, ne
   settingsController.testDatabase(req, res, next)
 );
 apiRouter.use('/settings', setRouter);
+setRouter.post('/run-migration', requireAuth, requireRole('ADMIN'), (req, res, next) =>
+  settingsController.runMigrationAndSeed(req, res, next)
+);
 
 // Audit Log Routes (Admin only)
 const auditRouter = Router();

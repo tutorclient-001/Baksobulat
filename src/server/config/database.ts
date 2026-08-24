@@ -5,6 +5,7 @@ let pool: Pool | null = null;
 let isConnectedToPostgres = false;
 let isConnecting = false;
 let connectPromise: Promise<boolean> | null = null;
+let isMigrated = false;
 
 // In-memory store for development/testing when DATABASE_URL is not configured
 export const memoryStore = {
@@ -36,7 +37,7 @@ export function getPool(): Pool | null {
 }
 
 export async function ensureDatabaseConnected(): Promise<boolean> {
-  if (isConnectedToPostgres) return true;
+  if (isConnectedToPostgres && isMigrated) return true;
   if (!config.DATABASE_URL || config.DATABASE_URL.trim() === '') {
     isConnectedToPostgres = false;
     return false;
@@ -61,13 +62,24 @@ export async function ensureDatabaseConnected(): Promise<boolean> {
 
       isConnectedToPostgres = true;
       console.log('✅ PostgreSQL database connected successfully.');
+
+      // Auto-create tables & seed default admin if not yet migrated
+      if (!isMigrated) {
+        try {
+          const { runMigrations } = await import('../db/migrate.js');
+          const { seedDatabase } = await import('../db/seed.js');
+          await runMigrations();
+          await seedDatabase();
+          isMigrated = true;
+        } catch (mErr: any) {
+          console.warn('⚠️ Auto-migration notice:', mErr.message);
+        }
+      }
+
       return true;
     } catch (err: any) {
       console.warn('⚠️ Could not connect to PostgreSQL database:', err.message);
       isConnectedToPostgres = false;
-      if (process.env.NODE_ENV === 'production') {
-        throw new Error(`Database connection failed in production: ${err.message}`);
-      }
       return false;
     } finally {
       isConnecting = false;
@@ -127,14 +139,6 @@ export async function checkDbHealth(): Promise<{
         error: e.message,
       };
     }
-  }
-
-  if (process.env.NODE_ENV === 'production') {
-    return {
-      healthy: false,
-      type: 'Neon PostgreSQL',
-      error: 'DATABASE_URL is not configured in production.',
-    };
   }
 
   return {

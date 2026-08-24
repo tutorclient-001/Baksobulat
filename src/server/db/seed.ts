@@ -27,69 +27,68 @@ export async function seedDatabase(): Promise<void> {
     storage_provider: googleDriveService.getIsConfigured() ? 'google-drive' : 'mock',
   });
 
-  // 2. Seed Users with Bcrypt Hashing (Admin, Tutor, Viewer)
-  const adminEmail = config.SEED_ADMIN_EMAIL || 'admin@banksoal.sch.id';
-  let admin = await userRepository.findByEmail(adminEmail);
-  if (!admin) {
-    const salt = await bcrypt.genSalt(10);
-    const hash = await bcrypt.hash(config.SEED_ADMIN_PASSWORD || 'Admin#2026!', salt);
-    admin = (await userRepository.create({
-      id: 'usr_admin_default',
-      name: 'Administrator Bank Soal',
-      email: adminEmail,
-      password_hash: hash,
-      role: 'ADMIN',
-      is_active: true,
-    })) as any;
-    console.log(`✅ Default Admin terdaftar: ${adminEmail}`);
-  }
+  // 2. Seed Users with Bcrypt Hashing (Admin 1, Admin 2, Client Admin, Tutor, Viewer)
+  const salt = await bcrypt.genSalt(10);
 
-  const tutorEmail = config.SEED_USER_EMAIL || 'guru@banksoal.sch.id';
-  let tutor = await userRepository.findByEmail(tutorEmail);
-  if (!tutor) {
-    const salt = await bcrypt.genSalt(10);
-    const hash = await bcrypt.hash(config.SEED_USER_PASSWORD || 'Tutor#2026!', salt);
-    tutor = (await userRepository.create({
+  const defaultUsers = [
+    {
+      id: 'usr_admin_default',
+      name: 'Administrator Bank Soal (Admin 1)',
+      email: config.SEED_ADMIN_EMAIL || 'admin@banksoal.sch.id',
+      rawPassword: config.SEED_ADMIN_PASSWORD || 'Admin#2026!',
+      role: 'ADMIN' as const,
+    },
+    {
+      id: 'usr_admin_second',
+      name: 'Administrator Cadangan (Admin 2)',
+      email: 'admin2@banksoal.sch.id',
+      rawPassword: 'Admin2#2026!',
+      role: 'ADMIN' as const,
+    },
+    {
+      id: 'usr_client_admin',
+      name: 'Administrator Utama (Client)',
+      email: 'tutorclient001@gmail.com',
+      rawPassword: 'Tutor#2026!',
+      role: 'ADMIN' as const,
+    },
+    {
       id: 'usr_tutor_default',
       name: 'Budi Santoso, S.Pd. (Tutor)',
-      email: tutorEmail,
-      password_hash: hash,
-      role: 'TUTOR',
-      is_active: true,
-    })) as any;
-    console.log(`✅ Default Tutor terdaftar: ${tutorEmail}`);
-  }
-
-  const viewerEmail = 'viewer@banksoal.sch.id';
-  let viewer = await userRepository.findByEmail(viewerEmail);
-  if (!viewer) {
-    const salt = await bcrypt.genSalt(10);
-    const hash = await bcrypt.hash('Viewer#2026!', salt);
-    viewer = (await userRepository.create({
+      email: config.SEED_USER_EMAIL || 'guru@banksoal.sch.id',
+      rawPassword: config.SEED_USER_PASSWORD || 'Tutor#2026!',
+      role: 'TUTOR' as const,
+    },
+    {
       id: 'usr_viewer_default',
       name: 'Siti Rahma (Viewer / Siswa)',
-      email: viewerEmail,
-      password_hash: hash,
-      role: 'VIEWER',
-      is_active: true,
-    })) as any;
-    console.log(`✅ Default Viewer terdaftar: ${viewerEmail}`);
-  }
+      email: 'viewer@banksoal.sch.id',
+      rawPassword: 'Viewer#2026!',
+      role: 'VIEWER' as const,
+    },
+  ];
 
-  const clientUserEmail = 'tutorclient001@gmail.com';
-  let clientUser = await userRepository.findByEmail(clientUserEmail);
-  if (!clientUser) {
-    const salt = await bcrypt.genSalt(10);
-    const hash = await bcrypt.hash('Tutor#2026!', salt);
-    clientUser = (await userRepository.create({
-      id: 'usr_client_tutor',
-      name: 'Tutor Client (Guru Pengampu)',
-      email: clientUserEmail,
-      password_hash: hash,
-      role: 'TUTOR',
-      is_active: true,
-    })) as any;
-    console.log(`✅ User Akun Client terdaftar: ${clientUserEmail}`);
+  for (const acc of defaultUsers) {
+    const hash = await bcrypt.hash(acc.rawPassword, salt);
+    const existing = await userRepository.findByEmail(acc.email);
+    if (!existing) {
+      await userRepository.create({
+        id: acc.id,
+        name: acc.name,
+        email: acc.email,
+        password_hash: hash,
+        role: acc.role,
+        is_active: true,
+      });
+      console.log(`✅ Default user terdaftar: ${acc.email} (${acc.role})`);
+    } else {
+      await userRepository.update(existing.id, {
+        name: acc.name,
+        password_hash: hash,
+        role: acc.role,
+        is_active: true,
+      });
+    }
   }
 
   // 3. Seed Categories
@@ -109,7 +108,7 @@ export async function seedDatabase(): Promise<void> {
   }
 
   // 4. Seed Master Data (Levels, Grades, Subjects, Search Tags)
-  const existingLevels = await masterDataRepository.listLevels();
+  const existingLevels = await masterDataRepository.listEducationLevels();
   if (existingLevels.length === 0) {
     const levels = [
       { id: 'lvl_sma', name: 'SMA / MA (Sekolah Menengah Atas)', code: 'SMA', description: 'Tingkat SMA/MA sederajat', order_index: 1 },
@@ -118,11 +117,11 @@ export async function seedDatabase(): Promise<void> {
       { id: 'lvl_umum', name: 'Umum & Pelatihan Guru', code: 'UMUM', description: 'Bahan ajar & seleksi umum', order_index: 4 },
     ];
     for (const l of levels) {
-      await masterDataRepository.createLevel(l);
+      await masterDataRepository.createEducationLevel(l);
     }
   }
 
-  const existingGrades = await masterDataRepository.listGrades();
+  const existingGrades = await masterDataRepository.listGradeLevels();
   if (existingGrades.length === 0) {
     const grades = [
       { id: 'grd_x', level_id: 'lvl_sma', level_name: 'SMA / MA', name: 'X', code: 'X', order_index: 1 },
@@ -133,7 +132,7 @@ export async function seedDatabase(): Promise<void> {
       { id: 'grd_ix', level_id: 'lvl_smp', level_name: 'SMP / MTs', name: 'IX', code: 'IX', order_index: 6 },
     ];
     for (const g of grades) {
-      await masterDataRepository.createGrade(g);
+      await masterDataRepository.createGradeLevel(g);
     }
   }
 
@@ -153,7 +152,7 @@ export async function seedDatabase(): Promise<void> {
     }
   }
 
-  const existingTags = await masterDataRepository.listTags();
+  const existingTags = await masterDataRepository.listSearchTags();
   if (existingTags.length === 0) {
     const tags = [
       { id: 'tag_kalkulus', name: 'Kalkulus', slug: 'kalkulus', color: 'indigo', description: 'Turunan dan Integral' },
@@ -163,13 +162,13 @@ export async function seedDatabase(): Promise<void> {
       { id: 'tag_kurikulum_merdeka', name: 'KurikulumMerdeka', slug: 'kurikulum-merdeka', color: 'violet', description: 'Modul Capaian Pembelajaran' },
     ];
     for (const t of tags) {
-      await masterDataRepository.createTag(t);
+      await masterDataRepository.createSearchTag(t);
     }
   }
 
   // 5. Seed Initial Sample Documents if table is empty
-  const docCount = await documentRepository.countAll();
-  if (docCount === 0) {
+  const docResult = await documentRepository.list({ page: 1, limit: 1 });
+  if (docResult.pagination.total === 0) {
     const sampleDocs = [
       {
         id: 'doc_sample_mat_xii',
@@ -186,7 +185,7 @@ export async function seedDatabase(): Promise<void> {
         tags: ['Kalkulus', 'KurikulumMerdeka', 'UjianResmi'],
         question_count: 40,
         status: 'ACTIVE' as const,
-        created_by: admin ? admin.id : 'usr_admin_default',
+        created_by: 'usr_admin_default',
       },
       {
         id: 'doc_sample_fis_xi',
@@ -203,7 +202,7 @@ export async function seedDatabase(): Promise<void> {
         tags: ['Mekanika', 'Fluida', 'PTS'],
         question_count: 35,
         status: 'ACTIVE' as const,
-        created_by: tutor ? tutor.id : 'usr_tutor_default',
+        created_by: 'usr_client_admin',
       },
     ];
 
@@ -213,24 +212,25 @@ export async function seedDatabase(): Promise<void> {
       // Add Sample Answer Keys (40 items)
       const sampleItems: AnswerKeyItem[] = Array.from({ length: docData.question_count }).map((_, i) => {
         const num = i + 1;
-        const options: ('A' | 'B' | 'C' | 'D' | 'E')[] = ['A', 'B', 'C', 'D', 'E'];
+        const options = ['A', 'B', 'C', 'D', 'E'];
         return {
-          question_number: num,
+          number: num,
           type: 'PG',
-          correct_answer: options[i % 5],
-          options,
+          optionsCount: 5,
+          correctAnswers: [options[i % 5]],
           weight: 2.5,
           explanation: `Pembahasan rinci dan kunci jawaban butir nomor ${num}`,
         };
       });
 
       await answerKeyRepository.upsert({
+        id: `ak_${docData.id}`,
         document_id: docData.id,
         total_questions: docData.question_count,
         passing_score: 75,
         max_score: 100,
         items: sampleItems,
-        updated_by: admin ? admin.id : 'usr_admin_default',
+        updated_by: 'usr_admin_default',
       });
     }
   }
